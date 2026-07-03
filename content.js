@@ -17,6 +17,7 @@
   let stopApplyRequested = false;
   let stopReplyRequested = false;
   let applyRunId = null;
+  let currentSearchCity = '';
 
   console.log('%c[自动投递助手] 脚本已加载 v3.0', 'color: #667eea; font-weight: bold; font-size: 14px;');
 
@@ -602,7 +603,24 @@
 
         if (detailArea) {
           description = detailArea.textContent || '';
-          
+
+          // 获取职位描述（BOSS直聘的详情描述区）
+          const jobDescSelectors = [
+            '.job-sec-text',
+            '.job-detail-section .text',
+            '.detail-content .job-sec-text',
+            '[class*="job-sec-text"]',
+            '.job-detail .text',
+            '.describe'
+          ];
+          for (const sel of jobDescSelectors) {
+            const descEl = detailArea.querySelector(sel) || document.querySelector(sel);
+            if (descEl && descEl.textContent.trim()) {
+              description = descEl.textContent.trim();
+              break;
+            }
+          }
+
           // 薪资
           const salaryEls = detailArea.querySelectorAll('.salary, [class*="salary"]');
           for (const el of salaryEls) {
@@ -818,32 +836,65 @@
         }
       }
       
-      if (!dialog) {
+      if (dialog) {
+        console.log('[Boss直聘] 检测到弹窗，处理中...');
+
+        // 优先点击"留在此页"或"继续"
+        const stayTexts = ['留在此页', '继续沟通', '继续', '知道了', '确定', '好的', '取消'];
+        for (const text of stayTexts) {
+          const btn = findElementByText('button', text, dialog);
+          if (btn) {
+            console.log(`[Boss直聘] 点击弹窗按钮: ${text}`);
+            reliableClick(btn);
+            await delay(500, 1000);
+            return;
+          }
+        }
+
+        // 找关闭按钮
+        const closeSelectors = ['.close', '.close-btn', '[class*="close"]'];
+        for (const sel of closeSelectors) {
+          const btn = dialog.querySelector(sel);
+          if (btn && btn.offsetParent !== null) {
+            reliableClick(btn);
+            await delay(500, 1000);
+            return;
+          }
+        }
+      } else {
         console.log('[Boss直聘] 没有检测到弹窗');
+      }
+
+      // 检查是否跳转到了聊天/消息页面
+      if (window.location.href.includes('/chat') || window.location.href.includes('/message') || window.location.href.includes('/zpchat')) {
+        console.log('[Boss直聘] 检测到跳转到聊天页，返回列表页');
+        history.back();
+        await delay(2000, 3000);
         return;
       }
-      
-      console.log('[Boss直聘] 检测到弹窗，处理中...');
-      
-      // 优先点击"留在此页"或"继续"
-      const stayTexts = ['留在此页', '继续沟通', '继续', '知道了', '确定', '好的', '取消'];
-      for (const text of stayTexts) {
-        const btn = findElementByText('button', text, dialog);
-        if (btn) {
-          console.log(`[Boss直聘] 点击弹窗按钮: ${text}`);
-          reliableClick(btn);
-          await delay(500, 1000);
-          return;
-        }
-      }
-      
-      // 找关闭按钮
-      const closeSelectors = ['.close', '.close-btn', '[class*="close"]'];
-      for (const sel of closeSelectors) {
-        const btn = dialog.querySelector(sel);
-        if (btn && btn.offsetParent !== null) {
-          reliableClick(btn);
-          await delay(500, 1000);
+
+      // 检查全屏遮罩/引导页
+      const overlaySelectors = [
+        '.overlay:not([style*="display: none"])',
+        '[class*="overlay"]:not([style*="display: none"])',
+        '.modal-mask:not([style*="display: none"])',
+        '.guide-overlay',
+        '[class*="guide"]',
+        '.full-screen-mask'
+      ];
+      for (const sel of overlaySelectors) {
+        const overlay = document.querySelector(sel);
+        if (overlay && overlay.offsetParent !== null) {
+          console.log('[Boss直聘] 检测到遮罩层，尝试关闭');
+          // 先找关闭/跳过按钮
+          const closeTexts = ['跳过', '关闭', '我知道了', '不再提示', '×'];
+          for (const text of closeTexts) {
+            const btn = findElementByText('button', text, overlay) || findElementByText('span', text, overlay) || findElementByText('a', text, overlay);
+            if (btn) { reliableClick(btn); await delay(500); return; }
+          }
+          // 直接点击遮罩空白处关闭
+          overlay.click();
+          await delay(500);
           return;
         }
       }
@@ -1035,7 +1086,18 @@
         const skillTags = item.querySelectorAll('[class*="tag"] span, [class*="skill"]');
         const skills = Array.from(skillTags).map(tag => tag.textContent.trim()).filter(t => t && t.length < 15);
 
-        return { title, salary, company, location, experience, education, skills, description: text, element: item };
+        // 获取完整职位描述
+        let description = text;
+        const descSelectors = ['.job-intention-container', '.job-summary', '.job-detail-desc', '[class*="job-desc"]', '[class*="describe"]', '.detail-content'];
+        for (const sel of descSelectors) {
+          const descEl = item.querySelector(sel);
+          if (descEl && descEl.textContent.trim()) {
+            description = descEl.textContent.trim();
+            break;
+          }
+        }
+
+        return { title, salary, company, location, experience, education, skills, description, element: item };
       } catch (e) {
         console.error('[智联招聘] 解析失败:', e);
         return null;
@@ -1157,10 +1219,16 @@
     },
 
     async scrollLoadMore() {
-      const scrollHeight = document.body.scrollHeight;
-      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      // 温和滚动：只滚动一小段，不是直接到底
+      const currentScroll = window.pageYOffset;
+      const viewportHeight = window.innerHeight;
+      window.scrollTo({
+        top: currentScroll + viewportHeight * 0.6,
+        behavior: 'smooth'
+      });
       await delay(1500, 2500);
-      return document.body.scrollHeight > scrollHeight;
+      // 检查是否有新内容
+      return document.body.scrollHeight > document.body.clientHeight;
     }
   };
 
@@ -1276,7 +1344,18 @@
         const skillTags = item.querySelectorAll('[class*="tag"] span, [class*="skill"]');
         const skills = Array.from(skillTags).map(tag => tag.textContent.trim()).filter(t => t && t.length < 15);
 
-        return { title, salary, company, location, experience, education, skills, description: text, element: item };
+        // 获取完整职位描述
+        let description = text;
+        const descSelectors = ['.job-intention-container', '.job-summary', '.job-detail-desc', '[class*="job-desc"]', '[class*="describe"]', '.detail-content'];
+        for (const sel of descSelectors) {
+          const descEl = item.querySelector(sel);
+          if (descEl && descEl.textContent.trim()) {
+            description = descEl.textContent.trim();
+            break;
+          }
+        }
+
+        return { title, salary, company, location, experience, education, skills, description, element: item };
       } catch (e) {
         console.error('[51job] 解析失败:', e);
         return null;
@@ -1506,7 +1585,18 @@
         const skillTags = item.querySelectorAll('[class*="tag"], [class*="skill"]');
         const skills = Array.from(skillTags).map(tag => tag.textContent.trim()).filter(t => t && t.length < 15);
 
-        return { title, salary, company, location, experience, education, skills, description: text, element: item };
+        // 获取完整职位描述
+        let description = text;
+        const descSelectors = ['.job-intention-container', '.job-summary', '.job-detail-desc', '[class*="job-desc"]', '[class*="describe"]', '.detail-content'];
+        for (const sel of descSelectors) {
+          const descEl = item.querySelector(sel);
+          if (descEl && descEl.textContent.trim()) {
+            description = descEl.textContent.trim();
+            break;
+          }
+        }
+
+        return { title, salary, company, location, experience, education, skills, description, element: item };
       } catch (e) {
         console.error('[应届生求职网] 解析失败:', e);
         return null;
@@ -1637,6 +1727,48 @@
     }
   }
 
+  async function ensureOnJobSearchPage() {
+    const url = window.location.href;
+
+    if (currentPlatform === 'boss') {
+      // Boss直聘：如果在聊天/消息页，跳转到职位搜索页
+      if (url.includes('/chat') || url.includes('/message') || url.includes('/zpchat') || url.includes('/user')) {
+        console.log('[自动投递] 当前不在职位页，正在跳转到职位搜索页...');
+        // 用配置中的关键词和城市搜索
+        const keyword = (config?.keywords || ['Java'])[0] || 'Java';
+        const city = (config?.location || '').split(/[,，]/)[0]?.trim() || '全国';
+        window.location.href = `https://www.zhipin.com/web/geek/job?query=${encodeURIComponent(keyword)}&city=${encodeURIComponent(city)}`;
+        await delay(3000, 5000);
+      }
+    } else if (currentPlatform === 'zhilian') {
+      if (!url.includes('/jobs/') && !url.includes('/searchjob') && !url.includes('sou')) {
+        const keyword = (config?.keywords || ['Java'])[0] || 'Java';
+        window.location.href = `https://sou.zhaopin.com/?jl=${encodeURIComponent(config?.location || '')}&kw=${encodeURIComponent(keyword)}`;
+        await delay(3000, 5000);
+      }
+    } else if (currentPlatform === 'job51') {
+      if (!url.includes('/list') && !url.includes('/search')) {
+        const keyword = (config?.keywords || ['Java'])[0] || 'Java';
+        window.location.href = `https://we.51job.com/pc/search?keyword=${encodeURIComponent(keyword)}&jobArea=${encodeURIComponent(config?.location || '000000')}`;
+        await delay(3000, 5000);
+      }
+    }
+  }
+
+  async function navigateToCitySearch(city) {
+    const keyword = (config?.keywords || ['Java'])[0] || 'Java';
+
+    if (currentPlatform === 'boss') {
+      window.location.href = `https://www.zhipin.com/web/geek/job?query=${encodeURIComponent(keyword)}&city=${encodeURIComponent(city)}`;
+    } else if (currentPlatform === 'zhilian') {
+      window.location.href = `https://sou.zhaopin.com/?jl=${encodeURIComponent(city)}&kw=${encodeURIComponent(keyword)}`;
+    } else if (currentPlatform === 'job51') {
+      window.location.href = `https://we.51job.com/pc/search?keyword=${encodeURIComponent(keyword)}&jobArea=${encodeURIComponent(city)}`;
+    }
+
+    await delay(3000, 5000);
+  }
+
   async function startAutoApply() {
     if (isApplyRunning) {
       console.log('[自动投递] 已经在运行中，忽略重复启动');
@@ -1649,11 +1781,18 @@
       return;
     }
 
+    // 确保在职位搜索页面
+    await ensureOnJobSearchPage();
+
     // 生成runId用于单例控制
     const runId = Date.now().toString();
     applyRunId = runId;
     isApplyRunning = true;
     stopApplyRequested = false;
+
+    // 初始化当前搜索城市
+    const cities = (config?.location || '').split(/[,，]/).map(c => c.trim()).filter(c => c);
+    currentSearchCity = cities[0] || '';
 
     const platformName = parser.platformName || currentPlatform;
     console.log(`%c[自动投递] 开始自动投递 - ${platformName}`, 'color: #51cf66; font-weight: bold;');
@@ -1743,8 +1882,8 @@
         const matchResult = calculateMatchScore(jobInfo);
         console.log(`[自动投递] 匹配度: ${matchResult.score}% | ${matchResult.reasons.join(', ')}`);
 
-        if (matchResult.score < (config?.minMatchScore || 60)) {
-          console.log(`[自动投递] 匹配度低于阈值 ${config?.minMatchScore || 60}%，跳过`);
+        if (matchResult.score < (config?.minMatchScore || 40)) {
+          console.log(`[自动投递] 匹配度低于阈值 ${config?.minMatchScore || 40}%，跳过`);
           continue;
         }
 
@@ -1777,6 +1916,20 @@
               await delay(1500, 2500);
             }
           }
+
+          // Boss直聘：确保回到列表页
+          if (currentPlatform === 'boss') {
+            // 关闭可能出现的弹窗/引导页
+            await BossParser.handleDialog();
+            await delay(500, 1000);
+            // 检查列表是否还可见
+            const listVisible = document.querySelector('.job-list-box, .search-job-result, [class*="job-list"]');
+            if (!listVisible || listVisible.offsetParent === null) {
+              console.log('[Boss直聘] 列表不可见，可能跳转了，尝试返回');
+              history.back();
+              await delay(2000, 3000);
+            }
+          }
         } else {
           console.log(`[自动投递] 投递失败: ${result.error}`);
         }
@@ -1798,6 +1951,52 @@
           await delay(1500, 2500);
         } else {
           noMoreContent = true;
+        }
+      }
+
+      // 多城市轮换：当前城市投完，切换到下一个城市
+      if (noMoreContent && applyRunId === runId && !stopApplyRequested) {
+        const cities = (config?.location || '').split(/[,，]/).map(c => c.trim()).filter(c => c);
+        let currentCityIndex = cities.indexOf(currentSearchCity);
+
+        if (cities.length > 1 && currentCityIndex < cities.length - 1) {
+          currentCityIndex++;
+          currentSearchCity = cities[currentCityIndex];
+          console.log(`[自动投递] 切换到下一个城市: ${currentSearchCity}`);
+          sendApplyStatus(`切换到${currentSearchCity}继续投递...`, 'running');
+
+          // 导航到新城市搜索
+          await navigateToCitySearch(currentSearchCity);
+          noMoreContent = false; // 重置，继续投递
+          currentPage = 1;
+          processedSet.clear();
+          continue;
+        } else if (cities.length > 0) {
+          // 所有城市都投完了，尝试一线城市轮换
+          const tier1Cities = ['北京', '上海', '广州', '深圳', '杭州', '成都', '南京', '武汉', '西安', '苏州'];
+          let cityIndex = tier1Cities.indexOf(currentSearchCity);
+          if (currentSearchCity && cities.includes(currentSearchCity)) {
+            // 已配置的城市投完了，开始一线城市轮换
+            currentSearchCity = tier1Cities[0];
+            console.log(`[自动投递] 所有配置城市已投完，切换到一线城市: ${currentSearchCity}`);
+            sendApplyStatus(`切换到${currentSearchCity}继续投递...`, 'running');
+            await navigateToCitySearch(currentSearchCity);
+            noMoreContent = false;
+            currentPage = 1;
+            processedSet.clear();
+            continue;
+          } else if (currentSearchCity && cityIndex >= 0 && cityIndex < tier1Cities.length - 1) {
+            // 继续一线城市轮换
+            cityIndex++;
+            currentSearchCity = tier1Cities[cityIndex];
+            console.log(`[自动投递] 切换到下一个一线城市: ${currentSearchCity}`);
+            sendApplyStatus(`切换到${currentSearchCity}继续投递...`, 'running');
+            await navigateToCitySearch(currentSearchCity);
+            noMoreContent = false;
+            currentPage = 1;
+            processedSet.clear();
+            continue;
+          }
         }
       }
     }

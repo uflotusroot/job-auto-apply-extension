@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "自动投递助手",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "根据技能匹配自动投递简历到各大招聘平台，支持Boss直聘、智联、51job、应届生等",
   "permissions": [
     "storage",
