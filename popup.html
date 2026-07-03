@@ -475,8 +475,20 @@
     <!-- 匹配设置 -->
     <div class="section">
       <div class="section-title">最低匹配度</div>
-      <input type="number" id="minMatchScore" value="60" min="0" max="100" placeholder="60">
-      <div class="help-text">低于此匹配度的职位将不会投递</div>
+      <input type="number" id="minMatchScore" value="40" min="0" max="100" placeholder="40">
+      <div class="help-text">低于此匹配度的职位将不会投递，默认40</div>
+    </div>
+
+    <!-- 技能匹配宽松度 -->
+    <div class="section">
+      <div class="section-title">技能匹配宽松度</div>
+      <select id="skillMatchLevel">
+        <option value="0">严格 - 匹配得多才给高分</option>
+        <option value="1">标准 - 适中</option>
+        <option value="2" selected>宽松 - 匹配2-3个就高分（推荐）</option>
+        <option value="3">极宽松 - 匹配1个就高分</option>
+      </select>
+      <div class="help-text">招聘要求写得很多时，建议选宽松或极宽松</div>
     </div>
 
     <!-- 投递间隔 -->

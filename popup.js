@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', function() {
   const keywordsInput = document.getElementById('keywords');
   const excludeKeywordsInput = document.getElementById('excludeKeywords');
   const minMatchScoreInput = document.getElementById('minMatchScore');
+  const skillMatchLevelSelect = document.getElementById('skillMatchLevel');
   const intervalInput = document.getElementById('interval');
   const enableBossCheckbox = document.getElementById('enableBoss');
   const enableZhilianCheckbox = document.getElementById('enableZhilian');
@@ -103,7 +104,8 @@ document.addEventListener('DOMContentLoaded', function() {
       location: locationInput.value,
       keywords: keywordsInput.value.split(/[,，]/).map(k => k.trim()).filter(k => k),
       excludeKeywords: excludeKeywordsInput.value.split(/[,，]/).map(k => k.trim()).filter(k => k),
-      minMatchScore: parseInt(minMatchScoreInput.value) || 60,
+      minMatchScore: parseInt(minMatchScoreInput.value) || 40,
+      skillMatchLevel: parseInt(skillMatchLevelSelect.value) || 2,
       interval: parseInt(intervalInput.value) || 5,
       platforms: {
         boss: enableBossCheckbox.checked,
@@ -139,7 +141,8 @@ document.addEventListener('DOMContentLoaded', function() {
         locationInput.value = config.location || '';
         keywordsInput.value = (config.keywords || []).join(', ');
         excludeKeywordsInput.value = (config.excludeKeywords || []).join(', ');
-        minMatchScoreInput.value = config.minMatchScore || 60;
+        minMatchScoreInput.value = config.minMatchScore || 40;
+        skillMatchLevelSelect.value = config.skillMatchLevel !== undefined ? config.skillMatchLevel : 2;
         intervalInput.value = config.interval || 5;
         
         if (config.platforms) {

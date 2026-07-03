@@ -60,8 +60,9 @@
       location: '',
       keywords: [],
       excludeKeywords: [],
-      minMatchScore: 60,
+      minMatchScore: 40,
       interval: 5,
+      skillMatchLevel: 2, // 0=严格 1=标准 2=宽松 3=极宽松
       platforms: { boss: true, zhilian: false, job51: false, yjs: false, jobOnline: false },
       humanMode: true,
       scrollInterval: 2000
@@ -293,7 +294,58 @@
       if (allText.includes(skill)) matched.push(skill);
     });
 
-    const score = Math.round(40 * (matched.length / userSkills.length));
+    const matchCount = matched.length;
+    const totalSkills = userSkills.length;
+    
+    // 宽松度等级对应的阶梯分数
+    // 每个等级定义：匹配到几个技能给多少分
+    const levelConfigs = {
+      0: [ // 严格：完全匹配才高分
+        { count: 0, score: 0 },
+        { count: 1, score: 8 },
+        { count: 2, score: 16 },
+        { count: 3, score: 24 },
+        { count: 4, score: 32 },
+        { count: 5, score: 38 },
+        { count: 99, score: 40 }
+      ],
+      1: [ // 标准
+        { count: 0, score: 0 },
+        { count: 1, score: 15 },
+        { count: 2, score: 25 },
+        { count: 3, score: 32 },
+        { count: 4, score: 37 },
+        { count: 99, score: 40 }
+      ],
+      2: [ // 宽松（默认）：匹配2个就有30分，3个以上就很高
+        { count: 0, score: 0 },
+        { count: 1, score: 22 },
+        { count: 2, score: 32 },
+        { count: 3, score: 37 },
+        { count: 4, score: 39 },
+        { count: 99, score: 40 }
+      ],
+      3: [ // 极宽松：匹配1个就25分，2个以上基本满分
+        { count: 0, score: 0 },
+        { count: 1, score: 28 },
+        { count: 2, score: 36 },
+        { count: 3, score: 39 },
+        { count: 99, score: 40 }
+      ]
+    };
+
+    const level = config.skillMatchLevel || 2;
+    const levels = levelConfigs[level] || levelConfigs[2];
+    
+    let score = 0;
+    for (const tier of levels) {
+      if (matchCount >= tier.count) {
+        score = tier.score;
+      } else {
+        break;
+      }
+    }
+
     return { score, matched };
   }
 
