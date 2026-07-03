@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>自动投递助手</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 420px;
+      min-height: 500px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 15px;
+    }
+
+    .container {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      font-size: 20px;
+      color: #333;
+      margin-bottom: 15px;
+      text-align: center;
+    }
+
+    /* 标签页切换 */
+    .tabs {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #f0f0f0;
+      padding-bottom: 10px;
+    }
+
+    .tab {
+      padding: 8px 16px;
+      border-radius: 6px 6px 0 0;
+      cursor: pointer;
+      font-size: 14px;
+      color: #888;
+      transition: all 0.3s;
+      border: none;
+      background: transparent;
+    }
+
+    .tab:hover {
+      color: #667eea;
+    }
+
+    .tab.active {
+      color: #667eea;
+      background: #f0f4ff;
+      font-weight: 600;
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .section {
+      margin-bottom: 20px;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #555;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+    }
+
+    .section-title::before {
+      content: '';
+      display: inline-block;
+      width: 4px;
+      height: 14px;
+      background: #667eea;
+      margin-right: 8px;
+      border-radius: 2px;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    textarea,
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 13px;
+      transition: border-color 0.3s;
+    }
+
+    input:focus,
+    textarea:focus,
+    select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .row .section {
+      flex: 1;
+      margin-bottom: 0;
+    }
+
+    .tags-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .tag {
+      background: #f0f4ff;
+      color: #667eea;
+      padding: 4px 10px;
+      border-radius: 15px;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .tag .remove {
+      cursor: pointer;
+      opacity: 0.6;
+    }
+
+    .tag .remove:hover {
+      opacity: 1;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      margin-top: 10px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-secondary {
+      background: #f5f5f5;
+      color: #333;
+    }
+
+    .btn-secondary:hover {
+      background: #e8e8e8;
+    }
+
+    .btn-danger {
+      background: #ff6b6b;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #ee5a5a;
+    }
+
+    .btn-success {
+      background: #51cf66;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #40c057;
+    }
+
+    .status {
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .status.success {
+      background: #d3f9d8;
+      color: #2b8a3e;
+    }
+
+    .status.error {
+      background: #ffe3e3;
+      color: #c92a2a;
+    }
+
+    .status.info {
+      background: #d0ebff;
+      color: #1864ab;
+    }
+
+    .status.running {
+      background: #fff3bf;
+      color: #e67700;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 15px;
+    }
+
+    .stat-item {
+      background: #f8f9fa;
+      padding: 12px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #667eea;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #888;
+      margin-top: 4px;
+    }
+
+    .platform-section {
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 2px solid #f0f0f0;
+    }
+
+    .platform-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+
+    .platform-name {
+      font-weight: 500;
+      font-size: 14px;
+    }
+
+    .toggle {
+      position: relative;
+      width: 50px;
+      height: 26px;
+    }
+
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: 0.3s;
+      border-radius: 26px;
+    }
+
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 20px;
+      width: 20px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+    }
+
+    .toggle input:checked + .toggle-slider {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+
+    .toggle input:checked + .toggle-slider:before {
+      transform: translateX(24px);
+    }
+
+    .help-text {
+      font-size: 11px;
+      color: #888;
+      margin-top: 4px;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    /* 回复模板样式 */
+    .template-item {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+
+    .template-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .template-keyword {
+      font-weight: 500;
+      color: #667eea;
+      font-size: 13px;
+    }
+
+    .template-remove {
+      color: #ff6b6b;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .template-reply {
+      font-size: 12px;
+      color: #666;
+      line-height: 1.4;
+      padding: 8px;
+      background: white;
+      border-radius: 6px;
+    }
+
+    .add-template-btn {
+      width: 100%;
+      padding: 10px;
+      background: #f0f4ff;
+      color: #667eea;
+      border: 1px dashed #667eea;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.3s;
+    }
+
+    .add-template-btn:hover {
+      background: #e8f0ff;
+    }
+
+    /* 帮答统计 */
+    .help-stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-top: 15px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>自动投递助手</h1>
+
+    <!-- 标签页切换 -->
+    <div class="tabs">
+      <button class="tab active" data-tab="apply">自动投递</button>
+      <button class="tab" data-tab="reply">智能帮答</button>
+    </div>
+
+    <!-- 自动投递标签页 -->
+    <div id="applyTab" class="tab-content active">
+
+    <!-- 个人技能配置 -->
+    <div class="section">
+      <div class="section-title">个人技能</div>
+      <textarea id="skills" placeholder="输入您的技能，用逗号分隔&#10;例如：Python, JavaScript, React, Node.js"></textarea>
+      <div class="tags-container" id="skillsTags"></div>
+    </div>
+
+    <!-- 工作年限 -->
+    <div class="row">
+      <div class="section">
+        <div class="section-title">工作年限</div>
+        <select id="experience">
+          <option value="0">不限</option>
+          <option value="1">1年以下</option>
+          <option value="2">1-3年</option>
+          <option value="3">3-5年</option>
+          <option value="4">5-10年</option>
+          <option value="5">10年以上</option>
+        </select>
+      </div>
+      <div class="section">
+        <div class="section-title">学历要求</div>
+        <select id="education">
+          <option value="0">不限</option>
+          <option value="1">大专</option>
+          <option value="2">本科</option>
+          <option value="3">硕士</option>
+          <option value="4">博士</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 薪资期望 -->
+    <div class="row">
+      <div class="section">
+        <div class="section-title">最低薪资(K)</div>
+        <input type="number" id="minSalary" placeholder="如：15" min="0">
+      </div>
+      <div class="section">
+        <div class="section-title">最高薪资(K)</div>
+        <input type="number" id="maxSalary" placeholder="如：25" min="0">
+      </div>
+    </div>
+
+    <!-- 工作地点 -->
+    <div class="section">
+      <div class="section-title">期望城市</div>
+      <input type="text" id="location" placeholder="例如：北京, 上海, 深圳">
+    </div>
+
+    <!-- 职位关键词 -->
+    <div class="section">
+      <div class="section-title">职位关键词</div>
+      <input type="text" id="keywords" placeholder="例如：前端开发, 后端工程师">
+      <div class="help-text">用于筛选目标职位，多个关键词用逗号分隔</div>
+    </div>
+
+    <!-- 排除关键词 -->
+    <div class="section">
+      <div class="section-title">排除关键词</div>
+      <input type="text" id="excludeKeywords" placeholder="例如：外包, 实习, 兼职">
+      <div class="help-text">包含这些关键词的职位将自动跳过</div>
+    </div>
+
+    <!-- 匹配设置 -->
+    <div class="section">
+      <div class="section-title">最低匹配度</div>
+      <input type="number" id="minMatchScore" value="60" min="0" max="100" placeholder="60">
+      <div class="help-text">低于此匹配度的职位将不会投递</div>
+    </div>
+
+    <!-- 投递间隔 -->
+    <div class="section">
+      <div class="section-title">投递间隔(秒)</div>
+      <input type="number" id="interval" value="5" min="3" max="60" placeholder="5">
+      <div class="help-text">每次投递之间的等待时间，建议5-10秒</div>
+    </div>
+
+    <!-- 平台设置 -->
+    <div class="platform-section">
+      <div class="section-title">启用平台</div>
+      <div class="platform-item">
+        <span class="platform-name">Boss直聘</span>
+        <label class="toggle">
+          <input type="checkbox" id="enableBoss" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="platform-item">
+        <span class="platform-name">智联招聘</span>
+        <label class="toggle">
+          <input type="checkbox" id="enableZhilian" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="platform-item">
+        <span class="platform-name">51job前程无忧</span>
+        <label class="toggle">
+          <input type="checkbox" id="enable51Job" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="platform-item">
+        <span class="platform-name">应届生求职网</span>
+        <label class="toggle">
+          <input type="checkbox" id="enableYjs" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="platform-item">
+        <span class="platform-name">就业在线</span>
+        <label class="toggle">
+          <input type="checkbox" id="enableJobOnline">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- 状态显示 -->
+    <div id="status" class="status info hidden"></div>
+
+    <!-- 统计信息 -->
+    <div class="stats" id="stats" class="hidden">
+      <div class="stat-item">
+        <div class="stat-value" id="totalScanned">0</div>
+        <div class="stat-label">已扫描</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="totalMatched">0</div>
+        <div class="stat-label">已匹配</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="totalApplied">0</div>
+        <div class="stat-label">已投递</div>
+      </div>
+    </div>
+
+    <!-- 操作按钮 -->
+    <button id="saveBtn" class="btn btn-primary">保存配置</button>
+    <button id="startBtn" class="btn btn-success">开始自动投递</button>
+    <button id="stopBtn" class="btn btn-danger hidden">停止投递</button>
+    <button id="resetBtn" class="btn btn-secondary">重置统计</button>
+    </div>
+
+    <!-- 智能帮答标签页 -->
+    <div id="replyTab" class="tab-content">
+
+    <!-- 帮答开关 -->
+    <div class="platform-section">
+      <div class="section-title">帮答功能</div>
+      <div class="platform-item">
+        <span class="platform-name">启用自动回复</span>
+        <label class="toggle">
+          <input type="checkbox" id="enableAutoReply">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- 个人简介 -->
+    <div class="section">
+      <div class="section-title">个人简介</div>
+      <textarea id="selfIntro" placeholder="简短介绍自己，用于回复招聘者&#10;例如：我有3年Python开发经验，熟悉Django和Flask框架，曾独立完成多个项目..."></textarea>
+      <div class="help-text">招聘者问"介绍一下自己"时会使用此内容</div>
+    </div>
+
+    <!-- 常见问题回复模板 -->
+    <div class="section">
+      <div class="section-title">常见问题回复模板</div>
+      <div id="replyTemplates"></div>
+      <button id="addTemplateBtn" class="add-template-btn">+ 添加回复模板</button>
+    </div>
+
+    <!-- 添加模板表单 -->
+    <div id="templateForm" class="section hidden">
+      <div class="section-title">添加新模板</div>
+      <input type="text" id="templateKeyword" placeholder="问题关键词（如：薪资、经验、加班）">
+      <textarea id="templateReply" placeholder="回复内容"></textarea>
+      <div class="row">
+        <button id="saveTemplateBtn" class="btn btn-success" style="flex:1">保存模板</button>
+        <button id="cancelTemplateBtn" class="btn btn-secondary" style="flex:1">取消</button>
+      </div>
+    </div>
+
+    <!-- 预设模板 -->
+    <div class="section">
+      <div class="section-title">快速启用预设模板</div>
+      <div class="platform-item">
+        <span class="platform-name">薪资相关回复</span>
+        <label class="toggle">
+          <input type="checkbox" id="presetSalary" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="platform-item">
+        <span class="platform-name">工作经验回复</span>
+        <label class="toggle">
+          <input type="checkbox" id="presetExperience" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="platform-item">
+        <span class="platform-name">到岗时间回复</span>
+        <label class="toggle">
+          <input type="checkbox" id="presetOnboard" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- 帮答统计 -->
+    <div class="help-stats">
+      <div class="stat-item">
+        <div class="stat-value" id="totalReplied">0</div>
+        <div class="stat-label">已回复消息</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="totalCandidates">0</div>
+        <div class="stat-label">处理招聘者</div>
+      </div>
+    </div>
+
+    <!-- 帮答操作按钮 -->
+    <button id="saveReplyBtn" class="btn btn-primary">保存帮答配置</button>
+    <button id="startReplyBtn" class="btn btn-success">开始帮答</button>
+    <button id="stopReplyBtn" class="btn btn-danger hidden">停止帮答</button>
+    </div>
+
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

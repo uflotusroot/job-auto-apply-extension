@@ -1,0 +1,28 @@
+# 排除生成工具和临时文件
+generate_icons.py
+generate_new_icon.py
+generate-icons.html
+icon-preview.html
+
+# 排除压缩包
+*.zip
+
+# 排除SVG图标源文件
+icons/*.svg
+
+# 排除日志文件
+*.log
+
+# 排除编辑器配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 排除node_modules（如果有）
+node_modules/
+
+# 排除操作系统文件
+.DS_Store
+Thumbs.db
