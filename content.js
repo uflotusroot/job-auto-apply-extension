@@ -1,7 +1,7 @@
 // content.js - 自动投递助手内容脚本
-// 版本: v3.0
+// 版本: v3.3.0
 // 功能: 自动投递简历 + 智能帮答 + 模拟人工操作
-// 更新: 重构Boss直聘为列表驱动模式，增强按钮点击可靠性
+// 更新: 修复Boss直聘跳转求职工具页问题、智联招聘投递逻辑、跨刷新任务恢复
 
 (function() {
   'use strict';
@@ -19,7 +19,7 @@
   let applyRunId = null;
   let currentSearchCity = '';
 
-  console.log('%c[自动投递助手] 脚本已加载 v3.0', 'color: #667eea; font-weight: bold; font-size: 14px;');
+  console.log('%c[自动投递助手] 脚本已加载 v3.3.0', 'color: #667eea; font-weight: bold; font-size: 14px;');
 
   // ==================== 初始化 ====================
   function init() {
@@ -30,12 +30,29 @@
     }
     console.log(`[自动投递助手] 当前平台: ${currentPlatform}`);
 
-    chrome.storage.local.get(['config', 'replyConfig', 'stats', 'replyStats'], function(result) {
+    chrome.storage.local.get(['config', 'replyConfig', 'stats', 'replyStats', 'applyState'], function(result) {
       config = result.config || getDefaultConfig();
       replyConfig = result.replyConfig || getDefaultReplyConfig();
       stats = result.stats || { scanned: 0, matched: 0, applied: 0 };
       replyStats = result.replyStats || { replied: 0, candidates: 0 };
       console.log('[自动投递助手] 配置已加载');
+
+      // 检查是否有未完成的投递任务（页面被强制刷新/跳转后的自动恢复）
+      const applyState = result.applyState;
+      if (applyState && applyState.running && applyState.platform === currentPlatform) {
+        const elapsed = Date.now() - (applyState.startedAt || 0);
+        // 仅在 30 分钟内的任务才自动恢复，避免无限循环
+        if (elapsed < 30 * 60 * 1000) {
+          console.log(`[自动投递助手] 检测到未完成的投递任务(已运行 ${Math.round(elapsed/1000)}s)，自动恢复...`);
+          // 等页面完全加载后再恢复
+          setTimeout(() => {
+            startAutoApply().catch(err => console.error('[自动投递] 恢复失败:', err));
+          }, 3000);
+        } else {
+          console.log('[自动投递助手] 发现过期任务状态，清理');
+          chrome.storage.local.set({ applyState: { running: false } });
+        }
+      }
     });
 
     injectDebugPanel();
@@ -816,6 +833,39 @@
     // 处理弹窗（如"去微信"、"留在此页"等）
     async handleDialog() {
       console.log('[Boss直聘] 检查是否有弹窗...');
+
+      // 优先处理：URL 跳转类问题（求职工具页/聊天页等）
+      const url = window.location.href;
+      // Boss直聘职位列表页 URL 特征：/web/geek/job? 或 /web/geek/recommend
+      const isOnJobListUrl = /\/web\/geek\/(job|recommend)/.test(url) || url.includes('/web/geek/job?');
+      // 已知会跳转走的页面：求职工具页、聊天页、消息页、个人中心
+      const isOnToolOrChatPage =
+        url.includes('/web/geek/job-tool') ||
+        url.includes('/web/geek/jobtool') ||
+        url.includes('job-tool') ||
+        url.includes('/chat') ||
+        url.includes('/message') ||
+        url.includes('/zpchat') ||
+        url.includes('/user/') ||
+        url.includes('/web/geek/user');
+
+      if (isOnToolOrChatPage && !isOnJobListUrl) {
+        console.log(`[Boss直聘] 检测到离开职位列表页(可能跳到求职工具/聊天页): ${url}`);
+        // 不依赖 history.back()，直接用保存的搜索参数回到职位列表
+        const backUrl = getBossSearchUrl();
+        console.log(`[Boss直聘] 显式跳回职位搜索页: ${backUrl}`);
+        // 用 history.back 优先（保留搜索状态/分页），失败再显式跳转
+        if (history.length > 1) {
+          history.back();
+          await delay(1500, 2500);
+        }
+        // 如果 back 之后仍不在列表页，强制跳转
+        if (!/\/web\/geek\/(job|recommend)/.test(window.location.href)) {
+          window.location.href = backUrl;
+          await delay(2500, 3500);
+        }
+        return;
+      }
       
       // 查找所有弹窗
       const dialogSelectors = [
@@ -840,7 +890,7 @@
         console.log('[Boss直聘] 检测到弹窗，处理中...');
 
         // 优先点击"留在此页"或"继续"
-        const stayTexts = ['留在此页', '继续沟通', '继续', '知道了', '确定', '好的', '取消'];
+        const stayTexts = ['留在此页', '继续沟通', '继续', '知道了', '确定', '好的', '取消', '稍后', '以后再说'];
         for (const text of stayTexts) {
           const btn = findElementByText('button', text, dialog);
           if (btn) {
@@ -865,11 +915,11 @@
         console.log('[Boss直聘] 没有检测到弹窗');
       }
 
-      // 检查是否跳转到了聊天/消息页面
-      if (window.location.href.includes('/chat') || window.location.href.includes('/message') || window.location.href.includes('/zpchat')) {
-        console.log('[Boss直聘] 检测到跳转到聊天页，返回列表页');
-        history.back();
-        await delay(2000, 3000);
+      // 二次检查：处理完弹窗后，URL 仍然不在列表页
+      if (!isOnJobListUrl) {
+        console.log('[Boss直聘] 仍不在职位列表页，显式跳回');
+        window.location.href = getBossSearchUrl();
+        await delay(2500, 3500);
         return;
       }
 
@@ -979,23 +1029,36 @@
     platformName: '智联招聘',
 
     getJobListItems() {
+      // 智联招聘列表页常见选择器（覆盖 sou.zhaopin.com 和 i.zhaopin.com）
       const selectors = [
         '.joblist-box .joblist-box__item',
+        '.joblist-box__item',
         '.job-list-item',
         'li.job-list-box__item',
         '.contentpile__content__wrapper__item',
         '.positionlist__item',
+        '.job-card',
+        '.jobcard',
+        '[class*="joblist-box__item"]',
         '[class*="job-list-item"]',
-        '[class*="joblist"] li'
+        '[class*="job-card"]',
+        '[class*="positionlist"] li',
+        '[class*="joblist"] li',
+        '.sou-job-item',
+        '[class*="sou-job-item"]'
       ];
       
       for (const selector of selectors) {
         const items = document.querySelectorAll(selector);
         const validItems = Array.from(items).filter(item => {
           const text = item.textContent || '';
+          // 放宽过滤条件：只要文本够长且包含薪资特征或职位关键词即可
           return text.length > 20 && 
-                 (text.includes('K') || text.includes('千') || text.includes('薪') || /\d+-\d+/.test(text)) &&
-                 item.offsetParent !== null;
+                 item.offsetParent !== null &&
+                 item.offsetHeight > 30 &&
+                 (text.includes('K') || text.includes('千') || text.includes('薪') || 
+                  /\d+\s*[-~]\s*\d+/.test(text) || text.includes('面议') ||
+                  text.includes('元') || text.includes('月'));
         });
         
         if (validItems.length > 0) {
@@ -1004,12 +1067,14 @@
         }
       }
       
-      const allLi = document.querySelectorAll('div[class*="job"]');
-      const jobItems = Array.from(allLi).filter(div => {
+      // 兜底：找所有包含薪资特征的 div
+      const allDivs = document.querySelectorAll('div[class*="job"], div[class*="position"], div[class*="card"]');
+      const jobItems = Array.from(allDivs).filter(div => {
         const text = div.textContent || '';
-        return /\d+\s*[-~]\s*\d+\s*[kK千]/.test(text) && 
+        return /\d+\s*[-~]\s*\d+\s*[kK千元]/.test(text) && 
                div.offsetParent !== null &&
-               div.offsetHeight > 50;
+               div.offsetHeight > 50 &&
+               div.offsetHeight < 500; // 排除过大的容器
       });
       
       if (jobItems.length > 0) {
@@ -1107,97 +1172,207 @@
     async clickApplyButton(jobItem) {
       const item = jobItem.element;
       console.log('[智联招聘] 查找投递按钮...');
-      
-      // 1. 在卡片上找
+
+      // 0. 先把卡片滚动到可见，并触发 hover（智联某些按钮在 hover 后才显示）
+      try { item.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+      await delay(400, 800);
+      try {
+        item.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, view: window }));
+        item.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, view: window }));
+      } catch(e) {}
+      await delay(300, 600);
+
+      // 1. 在卡片上找投递按钮
       let applyBtn = this.findApplyButton(item);
-      
-      // 2. 卡片上没有，点击进入详情
+      let fromDetail = false;
+
+      // 2. 卡片上没有，点击进入详情页查找
       if (!applyBtn) {
-        console.log('[智联招聘] 卡片无按钮，进入详情页...');
+        console.log('[智联招聘] 卡片无投递按钮，进入详情页...');
+        const listUrl = window.location.href;
+        const listItemCount = this.getJobListItems().length;
         await this.clickJobCard(item);
-        await delay(2000, 3000);
-        
-        // 等待页面加载后在详情页找
+        await delay(2500, 3500);
+
+        // 等待详情页加载（URL 变化 或 列表消失 或 出现详情元素）
         let waited = 0;
-        while (waited < 5000 && !applyBtn) {
+        while (waited < 6000) {
           applyBtn = this.findApplyButton(document);
           if (applyBtn) break;
+          // 详情页可能打开新标签页，这里检查不了，但当前页可能是详情
           await delay(500);
           waited += 500;
         }
+        fromDetail = !!applyBtn;
+
+        // 如果还是没找到，再等一会重试（详情页异步加载）
+        if (!applyBtn) {
+          await delay(1500, 2500);
+          applyBtn = this.findApplyButton(document);
+          if (applyBtn) fromDetail = true;
+        }
       }
-      
+
       if (!applyBtn) {
+        console.log('[智联招聘] 未找到投递按钮');
+        // 如果跳到详情页却没按钮，返回列表页
+        if (fromDetail || this.getJobListItems().length === 0) {
+          if (history.length > 1) {
+            history.back();
+            await delay(1500, 2500);
+          }
+        }
         return { success: false, error: '未找到投递按钮' };
       }
-      
-      console.log('[智联招聘] 找到投递按钮，点击');
+
+      console.log('[智联招聘] 找到投递按钮，准备点击');
       try { applyBtn.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
-      await delay(300, 600);
-      
+      await delay(400, 700);
+
+      // 触发 hover（详情页投递按钮也可能需要 hover 才可点）
+      try {
+        applyBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, view: window }));
+      } catch(e) {}
+      await delay(200, 400);
+
       const clicked = await HumanSimulator.clickElement(applyBtn);
       if (!clicked) reliableClick(applyBtn);
-      
-      // 处理确认弹窗
-      await delay(1000, 2000);
+      console.log('[智联招聘] 已点击投递按钮');
+
+      // 处理可能的确认弹窗（投递确认/简历选择/登录提示等）
+      await delay(1200, 2000);
       await this.handleConfirmDialog();
-      
+      await delay(800, 1500);
+      // 二次处理：有些弹窗分两步
+      await this.handleConfirmDialog();
+
+      // 如果跳转了详情页，投递完成后返回列表页
+      if (fromDetail) {
+        const stillOnDetail = this.getJobListItems().length === 0;
+        if (stillOnDetail && history.length > 1) {
+          console.log('[智联招聘] 投递完成，返回列表页');
+          history.back();
+          await delay(2000, 3000);
+        }
+      }
+
       return { success: true };
     },
 
     findApplyButton(container) {
-      const texts = ['立即投递', '投递简历', '申请职位', '投递', '立即申请'];
+      // 智联招聘投递按钮可能的文本：立即申请、申请职位、立即投递、投递简历、我要申请、申请
+      const texts = ['立即申请', '申请职位', '立即投递', '投递简历', '我要申请', '一键申请', '马上申请', '申请', '投递'];
+      // 先精确匹配
       for (const text of texts) {
         const btn = findElementByText('button', text, container);
         if (btn && btn.offsetParent !== null) return btn;
         const a = findElementByText('a', text, container);
         if (a && a.offsetParent !== null) return a;
+        const span = findElementByText('span', text, container);
+        if (span && span.offsetParent !== null && (span.onclick || span.parentElement?.tagName === 'BUTTON' || span.parentElement?.tagName === 'A')) {
+          return span;
+        }
       }
-      
+      // 包含匹配（按钮文本可能带图标/空格）
+      for (const text of texts) {
+        const btn = findElementContainingText('button', text, container);
+        if (btn && btn.offsetParent !== null) return btn;
+        const a = findElementContainingText('a', text, container);
+        if (a && a.offsetParent !== null) return a;
+      }
+
+      // 类名匹配（智联常用类名）
       const classSelectors = [
-        '.btn-apply', '.apply-btn', '.job-apply',
-        '.quick-apply-btn', 'button[data-type="apply"]',
-        '[class*="apply-btn"]'
+        '.btn-apply', '.apply-btn', '.job-apply', '.quick-apply-btn',
+        'button[data-type="apply"]', '[class*="apply-btn"]', '[class*="applyBtn"]',
+        '.jobbtn', '.job-btn', '[class*="jobbtn"]', '[class*="job-btn"]',
+        '.delivery-btn', '[class*="delivery"]', '.send-resume',
+        '[class*="sendResume"]', '[class*="send-resume"]',
+        '.position-apply', '[class*="positionApply"]',
+        '[class*="ApplyButton"]',
+        // 智联详情页常见按钮容器
+        '.job-detail .btn', '.job-detail button', '.details .btn'
       ];
       for (const sel of classSelectors) {
-        const btn = container.querySelector(sel);
-        if (btn && btn.offsetParent !== null) return btn;
+        const btns = container.querySelectorAll ? container.querySelectorAll(sel) : [];
+        for (const btn of btns) {
+          if (btn && btn.offsetParent !== null) return btn;
+        }
       }
-      
+
       return null;
     },
 
     async handleConfirmDialog() {
-      const dialogSelectors = ['[role="dialog"]', '.modal', '.dialog', '[class*="modal"]'];
+      // 弹窗选择器
+      const dialogSelectors = [
+        '[role="dialog"]', '.modal', '.dialog', '[class*="modal"]',
+        '[class*="dialog"]', '.popup', '[class*="popup"]', '.dialog-wrap'
+      ];
       for (const sel of dialogSelectors) {
-        const dialog = document.querySelector(sel);
-        if (dialog && dialog.offsetParent !== null) {
-          console.log('[智联招聘] 处理确认弹窗');
-          const confirmTexts = ['确认', '确定', '投递', '好的', '知道了'];
+        const dialogs = document.querySelectorAll(sel);
+        for (const dialog of dialogs) {
+          if (!dialog || dialog.offsetParent === null) continue;
+          console.log('[智联招聘] 检测到弹窗，尝试确认');
+          // 确认类按钮
+          const confirmTexts = ['确认投递', '确认申请', '确认', '确定', '投递', '申请', '好的', '知道了', '继续', '同意'];
           for (const text of confirmTexts) {
-            const btn = findElementByText('button', text, dialog);
-            if (btn) { reliableClick(btn); await delay(500); return; }
+            const btn = findElementByText('button', text, dialog) ||
+                        findElementByText('a', text, dialog) ||
+                        findElementByText('span', text, dialog);
+            if (btn && btn.offsetParent !== null) {
+              console.log(`[智联招聘] 点击确认按钮: ${text}`);
+              reliableClick(btn);
+              await delay(600, 1000);
+              return true;
+            }
+          }
+          // 关闭按钮（用于不需要确认的提示窗）
+          const closeBtn = dialog.querySelector('.close, .close-btn, [class*="close"]');
+          if (closeBtn && closeBtn.offsetParent !== null) {
+            // 仅当弹窗内文本含"已投递"等无需操作的字样时才关闭
+            const dlgText = dialog.textContent || '';
+            if (dlgText.includes('已投递') || dlgText.includes('已申请') || dlgText.includes('成功')) {
+              reliableClick(closeBtn);
+              await delay(400, 800);
+              return true;
+            }
           }
         }
       }
+      return false;
     },
 
     async clickJobCard(item) {
-      const linkSelectors = ['a[href*="job"]', '.job-title a', '.positionname a', 'a[class*="job"]'];
+      // 优先点击职位标题链接（通常打开详情页）
+      const linkSelectors = [
+        'a[href*="/jobs/"]', 'a[href*="zhaopin"]', 'a[href*="job"]',
+        '.job-title a', '.positionname a', '.job-name a',
+        'a[class*="job"]', 'a[class*="position"]'
+      ];
       for (const sel of linkSelectors) {
         const link = item.querySelector(sel);
-        if (link) {
+        if (link && link.offsetParent !== null) {
+          console.log(`[智联招聘] 点击职位链接: ${sel}`);
           await HumanSimulator.clickElement(link);
           return true;
         }
       }
+      // 兜底：点击卡片本身
+      console.log('[智联招聘] 兜底点击卡片');
       await HumanSimulator.clickElement(item);
       return true;
     },
 
     hasCommunicated(jobItem) {
       const text = jobItem.element?.textContent || '';
-      return text.includes('已投递') || text.includes('已申请') || text.includes('继续沟通');
+      return text.includes('已投递') || text.includes('已申请') || text.includes('继续沟通') || text.includes('已沟通');
+    },
+
+    // 列表级判断：是否已投递（用于早期跳过）
+    isJobItemApplied(item) {
+      const text = item.textContent || '';
+      return text.includes('已投递') || text.includes('已申请') || text.includes('已沟通');
     },
 
     async goToNextPage() {
@@ -1219,16 +1394,26 @@
     },
 
     async scrollLoadMore() {
-      // 温和滚动：只滚动一小段，不是直接到底
+      // 温和滚动：只滚动一小段，避免直接跳到底部导致漏掉职位
+      // 关键：通过对比滚动前后的职位数量来判断是否加载了新内容
+      const beforeCount = this.getJobListItems().length;
+      const beforeScrollHeight = document.body.scrollHeight;
       const currentScroll = window.pageYOffset;
       const viewportHeight = window.innerHeight;
       window.scrollTo({
         top: currentScroll + viewportHeight * 0.6,
         behavior: 'smooth'
       });
-      await delay(1500, 2500);
-      // 检查是否有新内容
-      return document.body.scrollHeight > document.body.clientHeight;
+      await delay(1800, 2800);
+      const afterCount = this.getJobListItems().length;
+      const afterScrollHeight = document.body.scrollHeight;
+      // 加载了新内容：职位数量增加 或 页面高度增加
+      const loadedNew = afterCount > beforeCount || afterScrollHeight > beforeScrollHeight;
+      // 还能继续往下滚：未到底部
+      const canScrollMore = (window.pageYOffset + window.innerHeight) < document.body.scrollHeight - 50;
+      console.log(`[智联招聘] 滚动加载: 之前 ${beforeCount} 个，现在 ${afterCount} 个，${loadedNew ? '有新内容' : '无新内容'}, ${canScrollMore ? '可继续' : '已到底'}`);
+      // 只要有新内容 OR 还能继续滚，就返回 true（让主循环继续处理）
+      return loadedNew || canScrollMore;
     }
   };
 
@@ -1727,17 +1912,31 @@
     }
   }
 
+  // 构造 Boss直聘 职位搜索 URL（使用配置中的关键词与城市）
+  function getBossSearchUrl() {
+    const keyword = (config?.keywords && config.keywords[0]) || 'Java';
+    let city = (config?.location || '').split(/[,，]/)[0]?.trim() || '全国';
+    // 如果是当前轮换中的城市，使用它
+    if (currentSearchCity) city = currentSearchCity;
+    return `https://www.zhipin.com/web/geek/job?query=${encodeURIComponent(keyword)}&city=${encodeURIComponent(city)}`;
+  }
+
   async function ensureOnJobSearchPage() {
     const url = window.location.href;
 
     if (currentPlatform === 'boss') {
-      // Boss直聘：如果在聊天/消息页，跳转到职位搜索页
-      if (url.includes('/chat') || url.includes('/message') || url.includes('/zpchat') || url.includes('/user')) {
-        console.log('[自动投递] 当前不在职位页，正在跳转到职位搜索页...');
-        // 用配置中的关键词和城市搜索
-        const keyword = (config?.keywords || ['Java'])[0] || 'Java';
-        const city = (config?.location || '').split(/[,，]/)[0]?.trim() || '全国';
-        window.location.href = `https://www.zhipin.com/web/geek/job?query=${encodeURIComponent(keyword)}&city=${encodeURIComponent(city)}`;
+      // Boss直聘：只有 /web/geek/job 或 /web/geek/recommend 才是职位页
+      // 其余如 /chat /message /zpchat /user /job-tool 都需要跳回
+      const isOnJobListUrl = /\/web\/geek\/(job|recommend)/.test(url);
+      const needRedirect = !isOnJobListUrl && (
+        url.includes('/chat') || url.includes('/message') || url.includes('/zpchat') ||
+        url.includes('/user/') || url.includes('/web/geek/user') ||
+        url.includes('job-tool') || url.includes('/web/geek/job-tool') ||
+        url.includes('/web/geek/jobtool')
+      );
+      if (needRedirect) {
+        console.log('[自动投递] 当前不在职位页(检测到工具/聊天页)，正在跳转到职位搜索页...');
+        window.location.href = getBossSearchUrl();
         await delay(3000, 5000);
       }
     } else if (currentPlatform === 'zhilian') {
@@ -1789,6 +1988,16 @@
     applyRunId = runId;
     isApplyRunning = true;
     stopApplyRequested = false;
+
+    // 持久化任务状态：用于页面被强制跳转/刷新后自动恢复
+    chrome.storage.local.set({
+      applyState: {
+        running: true,
+        runId: runId,
+        platform: currentPlatform,
+        startedAt: parseInt(runId)
+      }
+    });
 
     // 初始化当前搜索城市
     const cities = (config?.location || '').split(/[,，]/).map(c => c.trim()).filter(c => c);
@@ -1917,17 +2126,21 @@
             }
           }
 
-          // Boss直聘：确保回到列表页
+          // Boss直聘：确保回到列表页（处理求职工具页/聊天页跳转）
           if (currentPlatform === 'boss') {
-            // 关闭可能出现的弹窗/引导页
+            // 关闭可能出现的弹窗/引导页（同时会处理 URL 跳转）
             await BossParser.handleDialog();
             await delay(500, 1000);
-            // 检查列表是否还可见
+            // 二次校验：URL 是否在职位列表页
+            const currentUrl = window.location.href;
+            const isOnJobListUrl = /\/web\/geek\/(job|recommend)/.test(currentUrl);
             const listVisible = document.querySelector('.job-list-box, .search-job-result, [class*="job-list"]');
-            if (!listVisible || listVisible.offsetParent === null) {
-              console.log('[Boss直聘] 列表不可见，可能跳转了，尝试返回');
-              history.back();
-              await delay(2000, 3000);
+            if (!isOnJobListUrl || !listVisible || listVisible.offsetParent === null) {
+              console.log('[Boss直聘] 列表不可见/已离开职位页，显式跳回搜索页');
+              window.location.href = getBossSearchUrl();
+              await delay(2500, 3500);
+              // 跳转后等待列表加载
+              await delay(1000, 2000);
             }
           }
         } else {
@@ -2004,6 +2217,8 @@
     if (applyRunId === runId) {
       isApplyRunning = false;
       applyRunId = null;
+      // 清除持久化状态
+      chrome.storage.local.set({ applyState: { running: false } });
       updateDebugPanel('status', '已停止');
       sendApplyStatus(
         `投递完成！扫描 ${stats.scanned} 个，匹配 ${stats.matched} 个，投递 ${stats.applied} 个`, 
@@ -2017,6 +2232,8 @@
     stopApplyRequested = true;
     isApplyRunning = false;
     applyRunId = null;
+    // 清除持久化状态
+    chrome.storage.local.set({ applyState: { running: false } });
     console.log('[自动投递] 已停止');
     updateDebugPanel('status', '已停止');
     sendApplyStatus('投递已停止', 'info');
@@ -2171,7 +2388,7 @@
     `;
     
     panel.innerHTML = `
-      <div style="font-weight: bold; margin-bottom: 8px; color: #667eea;">📮 自动投递助手 v3.0</div>
+      <div style="font-weight: bold; margin-bottom: 8px; color: #667eea;">📮 自动投递助手 v3.3.0</div>
       <div>状态: <span id="debug-status">待机</span></div>
       <div>当前页: <span id="debug-page">-</span></div>
       <div>已扫描: <span id="debug-scanned">0</span></div>
